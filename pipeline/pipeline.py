@@ -197,27 +197,27 @@ con.register("camp_in", pa.Table.from_pylist([{"campaign":c,"channel":ch} for c,
 os.makedirs(os.path.join(OUT,"user_daily"),exist_ok=True)
 os.makedirs(os.path.join(OUT,"campaign_daily"),exist_ok=True)
 con.execute(f"""COPY (WITH cats AS (
- SELECT n.person,CAST(to_timestamp(s.st/1000) AS DATE) day,coalesce(p.category,'unknown') category,sum(n.price)::BIGINT rev
+ SELECT n.person,CAST(to_timestamp(s.st/1000) AS DATE) AS session_day,coalesce(p.category,'unknown') AS category,sum(n.price)::BIGINT AS rev
  FROM numbered_events n JOIN sess_in s ON n.person=s.person AND n.sn=s.sn
  LEFT JOIN prod_in p ON n.prod=p.prod WHERE n.typ='purchase'
- GROUP BY n.person,day,category
-), ranked AS (SELECT *, row_number() OVER(PARTITION BY person,day ORDER BY rev DESC,category COLLATE "binary") rn FROM cats),
-daily AS (SELECT person,CAST(to_timestamp(st/1000) AS DATE) day,count(*)::BIGINT sessions,sum(ev)::BIGINT events,sum(revenue)::BIGINT revenue_cents
- FROM sess_in GROUP BY person,day)
- SELECT d.person AS user_id,d.day,d.sessions,d.events,d.revenue_cents,r.category AS top_category FROM daily d
- LEFT JOIN ranked r ON r.person=d.person AND r.day=d.day AND r.rn=1
+ GROUP BY n.person,session_day,category
+), ranked AS (SELECT *, row_number() OVER(PARTITION BY person,session_day ORDER BY rev DESC,category COLLATE "binary") AS rn FROM cats),
+daily AS (SELECT person,CAST(to_timestamp(st/1000) AS DATE) AS session_day,count(*)::BIGINT AS sessions,sum(ev)::BIGINT AS events,sum(revenue)::BIGINT AS revenue_cents
+ FROM sess_in GROUP BY person,session_day)
+ SELECT d.person AS user_id,d.session_day AS "day",d.sessions,d.events,d.revenue_cents,r.category AS top_category FROM daily d
+ LEFT JOIN ranked r ON r.person=d.person AND r.session_day=d.session_day AND r.rn=1
  ) TO '{os.path.join(OUT,'user_daily','part-0.parquet')}' (FORMAT parquet)""")
 con.execute(f"""COPY (WITH credited_daily AS (
- SELECT campaign, CAST(to_timestamp(st/1000) AS DATE) day,count(*)::BIGINT sessions,
- count(*) FILTER(WHERE purchasing)::BIGINT purchasing_sessions,sum(revenue)::BIGINT revenue_cents
- FROM sess_in GROUP BY campaign,day
-), assist_daily AS (SELECT campaign,CAST(to_timestamp(st/1000) AS DATE) day,count(*)::BIGINT assisted_sessions
- FROM (SELECT DISTINCT person,sn,st,campaign FROM assist_in) GROUP BY campaign,day), keys AS (
- SELECT campaign,day FROM credited_daily UNION SELECT campaign,day FROM assist_daily)
- SELECT k.campaign AS campaign_id,coalesce(c.channel,'organic') channel,k.day,
+ SELECT campaign, CAST(to_timestamp(st/1000) AS DATE) AS session_day,count(*)::BIGINT AS sessions,
+ count(*) FILTER(WHERE purchasing)::BIGINT AS purchasing_sessions,sum(revenue)::BIGINT AS revenue_cents
+ FROM sess_in GROUP BY campaign,session_day
+), assist_daily AS (SELECT campaign,CAST(to_timestamp(st/1000) AS DATE) AS session_day,count(*)::BIGINT AS assisted_sessions
+ FROM (SELECT DISTINCT person,sn,st,campaign FROM assist_in) GROUP BY campaign,session_day), keys AS (
+ SELECT campaign,session_day FROM credited_daily UNION SELECT campaign,session_day FROM assist_daily)
+ SELECT k.campaign AS campaign_id,coalesce(c.channel,'organic') AS channel,k.session_day AS "day",
  coalesce(d.sessions,0)::BIGINT sessions,coalesce(d.purchasing_sessions,0)::BIGINT purchasing_sessions,
  coalesce(d.revenue_cents,0)::BIGINT revenue_cents,coalesce(a.assisted_sessions,0)::BIGINT assisted_sessions
- FROM keys k LEFT JOIN credited_daily d USING(campaign,day) LEFT JOIN assist_daily a USING(campaign,day)
+ FROM keys k LEFT JOIN credited_daily d USING(campaign,session_day) LEFT JOIN assist_daily a USING(campaign,session_day)
  LEFT JOIN camp_in c ON k.campaign=c.campaign
  ) TO '{os.path.join(OUT,'campaign_daily','part-0.parquet')}' (FORMAT parquet)""")
 print(f"wrote {len(sess)} sessions")
