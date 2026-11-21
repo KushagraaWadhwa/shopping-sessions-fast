@@ -1,0 +1,6 @@
+.git
+*.zip
+starter-*/
+__pycache__/
+*.pyc
+
