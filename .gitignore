@@ -1,0 +1,9 @@
+*.zip
+starter-duckdb/
+starter-polars/
+starter-pyspark/
+dev/
+out/
+__pycache__/
+*.pyc
+
